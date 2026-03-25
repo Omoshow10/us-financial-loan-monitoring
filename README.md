@@ -11,7 +11,7 @@ This project simulates an end-to-end **loan portfolio risk monitoring system** f
 | Layer | Technology | Purpose |
 |-------|-----------|---------|
 | Data Generation | Python (NumPy, Pandas) | Synthetic FDIC-inspired loan dataset |
-| Data Storage | SQL (ANSI compatible) | Schema, indexes, analytical queries |
+| Data Storage | PostgreSQL 14+ / SQL Server 2019+ | Schema, indexes, and analytical queries |
 | Predictive Model | Python (scikit-learn) | Probability of Default (PD) model |
 | Visualization | Power BI | 4-page interactive risk dashboard |
 
@@ -78,7 +78,7 @@ us-financial-loan-monitoring/
 
 ## 🚀 Quick Start
 
-### 1. Clone & Setup
+### 1. Clone & Install Python Dependencies
 
 ```bash
 git clone https://github.com/your-username/us-financial-loan-monitoring.git
@@ -86,40 +86,52 @@ cd us-financial-loan-monitoring
 pip install -r requirements.txt
 ```
 
-### 2. Generate Dataset
+### 2. Generate the Dataset & Train the PD Model
 
 ```bash
-python python/generate_data.py
+python python/01_data_generation.py    # generates 5,000 loan records
+python python/03_default_prediction.py # trains model, exports PD scores
 ```
 
-Outputs 4 CSV files to `data/processed/` including 5,000 synthetic loans with realistic credit profiles, delinquency statuses, and loss amounts.
+Outputs to `data/processed/`:
+- `loan_portfolio.csv` — 5,000 synthetic loans with realistic risk profiles
+- `loan_portfolio_scored.csv` — same dataset with model PD scores added
 
-### 3. Run Analysis & Model
+### 3. Set Up the SQL Database
+
+The project supports **PostgreSQL 14+** and **SQL Server 2019+**.
+All four SQL scripts are written in ANSI SQL and run on both platforms.
+See [`docs/setup_guide.md`](docs/setup_guide.md) for the complete database setup walkthrough.
+
+**PostgreSQL (quick start):**
 
 ```bash
-python python/risk_model.py
+psql -U postgres -c "CREATE DATABASE loan_risk_db;"
+psql -U postgres -d loan_risk_db -f sql/01_create_schema.sql
+# Edit file paths in Section A of 03_data_ingestion.sql, then:
+psql -U postgres -d loan_risk_db -f sql/03_data_ingestion.sql
+psql -U postgres -d loan_risk_db -f sql/02_dashboard_queries.sql
 ```
 
-Outputs:
-- `outputs/eda_charts.png` — 6-panel EDA visualization
-- `outputs/model_performance.png` — Model ROC + confusion matrix
-- `data/processed/loan_portfolio_scored.csv` — All loans with PD scores
+**SQL Server (quick start):**
 
-### 4. Build SQL Analytics
+Open SSMS, create a database named `loan_risk_db`, then run:
+1. `sql/01_create_schema.sql` — uncomment the SQL Server drop block
+2. `sql/03_data_ingestion.sql` — run **Section B only** (BULK INSERT), update file paths
+3. `sql/02_dashboard_queries.sql` — switch `LIMIT` to `TOP` where noted
 
-Load `data/processed/loan_portfolio.csv` into your SQL environment:
+### 4. SQL Script Compatibility Reference
 
-```bash
-# SQLite example
-sqlite3 loan_risk.db
-.mode csv
-.import data/processed/loan_portfolio.csv loan_portfolio
-.read sql/02_dashboard_queries.sql
-```
+| Script | PostgreSQL | SQL Server | Key difference |
+|--------|-----------|------------|----------------|
+| `01_create_schema.sql` | ✅ | ✅ | Use drop block (1) or (2) |
+| `02_dashboard_queries.sql` | ✅ | ✅ | `LIMIT N` vs `TOP N` |
+| `03_data_ingestion.sql` | ✅ Section A | ✅ Section B | `\COPY` vs `BULK INSERT` |
+| `04_risk_segmentation.sql` | ✅ | ✅ | `LIMIT N` vs `TOP N` |
 
 ### 5. Build Power BI Dashboard
 
-See [`powerbi/POWERBI_SETUP.md`](powerbi/POWERBI_SETUP.md) for full step-by-step instructions including data import, DAX measures, and visual layout.
+See [`powerbi/POWERBI_SETUP.md`](powerbi/POWERBI_SETUP.md) for full step-by-step instructions including CSV import, DAX measures, and visual layout.
 
 ---
 
@@ -153,7 +165,8 @@ Python 3.10+
 └── seaborn         – heatmaps
 
 SQL
-└── ANSI SQL (compatible with SQL Server, PostgreSQL, SQLite, MySQL)
+├── PostgreSQL 14+   (primary development platform)
+└── SQL Server 2019+ (fully supported — all scripts ANSI compatible)
 
 Power BI Desktop
 └── DAX measures, custom theme, 4-page report

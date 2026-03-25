@@ -2,6 +2,7 @@
 ## US Financial Loan Monitoring System
 
 Step-by-step instructions to get the full project running locally.
+This guide covers **both PostgreSQL and SQL Server** — follow the section that matches your environment.
 
 ---
 
@@ -9,10 +10,15 @@ Step-by-step instructions to get the full project running locally.
 
 | Tool | Version | Download |
 |------|---------|----------|
-| PostgreSQL | 14+ | https://www.postgresql.org/download/ |
+| **PostgreSQL** *(Option A)* | 14+ | https://www.postgresql.org/download/ |
+| **SQL Server** *(Option B)* | 2019+ | https://www.microsoft.com/en-us/sql-server/sql-server-downloads |
+| **SQL Server Management Studio** *(if using SQL Server)* | 19+ | https://aka.ms/ssmsfullsetup |
 | Python | 3.9+ | https://www.python.org/downloads/ |
 | Power BI Desktop | Latest | https://powerbi.microsoft.com/desktop |
 | Git | Any | https://git-scm.com/ |
+
+> You only need **one** of PostgreSQL or SQL Server — not both.
+> All four SQL scripts are compatible with either platform.
 
 ---
 
@@ -30,7 +36,7 @@ cd us-financial-loan-monitoring
 ```bash
 # Create and activate virtual environment (recommended)
 python -m venv venv
-source venv/bin/activate        # macOS/Linux
+source venv/bin/activate        # macOS / Linux
 venv\Scripts\activate           # Windows
 
 # Install dependencies
@@ -47,20 +53,14 @@ python python/01_data_generation.py
 
 Expected output:
 ```
-Generating 5,000 synthetic loan records...
-  Generated 5,000 records
-  Delinquency rate (30+): 8.3%
-  Charge-off rate:        2.1%
-  NPL rate (90+):         4.2%
-  Avg FICO:               682
-  Total portfolio:        $412,847,250
-
-✅ Dataset saved to: data/sample_loan_data.csv
+loan_portfolio.csv → 5,000 rows
+Delinquency rate: 17.04%
+Charge-off rate:  1.54%
+Total portfolio:  $0.71B
+Avg credit score: 700
 ```
 
----
-
-## Step 4 — Train the ML Model
+Then run the ML model to add PD scores:
 
 ```bash
 python python/03_default_prediction.py
@@ -68,85 +68,204 @@ python python/03_default_prediction.py
 
 Expected output:
 ```
-[1/3] Training Logistic Regression...
-  Logistic Regression ROC-AUC: 0.8123
-[2/3] Training Random Forest...
-  Random Forest ROC-AUC:       0.8891
-[3/3] Training XGBoost...
-  XGBoost ROC-AUC:             0.9012
+Logistic Regression  AUC=0.8195
+Random Forest        AUC=0.8035
+Gradient Boosting    AUC=0.7655
 
-✅ Scored dataset saved: data/loan_data_with_pd_scores.csv
-✅ Feature importance saved (model: xgboost)
-✅ Model metrics saved
+Best model: Logistic Regression
+Saved: loan_portfolio_scored.csv (5,000 rows)
 ```
 
 ---
 
-## Step 5 — Set Up the Database (Optional)
+## Step 4A — Database Setup (PostgreSQL)
 
-If you want to use the SQL scripts and Power BI with live database:
+### 4A-1. Create the database
 
 ```bash
-# Create database
 psql -U postgres -c "CREATE DATABASE loan_risk_db;"
-
-# Run schema setup
-psql -U postgres -d loan_risk_db -f sql/01_schema_setup.sql
-
-# Load data (requires psycopg2 and database running)
-# Update connection string in the script first
-python python/01_data_generation.py --load-to-db
 ```
 
-**Connection string format:**
+### 4A-2. Run the schema script
+
+```bash
+psql -U postgres -d loan_risk_db -f sql/01_create_schema.sql
 ```
-postgresql://postgres:yourpassword@localhost:5432/loan_risk_db
+
+Expected output:
 ```
+CREATE TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE INDEX  (×7)
+```
+
+### 4A-3. Load the data
+
+Open `sql/03_data_ingestion.sql` and update the two file paths in **Section A** to point to your local `data/processed/` folder.
+
+Then run:
+
+```bash
+psql -U postgres -d loan_risk_db -f sql/03_data_ingestion.sql
+```
+
+Expected output:
+```
+COPY 5000
+COPY 5000
+UPDATE 5000
+INSERT 0 24
+
+ table_name         | row_count
+--------------------+-----------
+ loan_portfolio     |      5000
+ loan_risk_scores   |      5000
+ delinquency_history|        24
+```
+
+### 4A-4. Run the dashboard queries
+
+```bash
+psql -U postgres -d loan_risk_db -f sql/02_dashboard_queries.sql
+psql -U postgres -d loan_risk_db -f sql/04_risk_segmentation.sql
+```
+
+### 4A-5. Connection string for Power BI DirectQuery (optional)
+
+```
+Host:     localhost
+Port:     5432
+Database: loan_risk_db
+Username: postgres
+```
+
+### Troubleshooting — PostgreSQL
+
+**Connection refused:**
+```bash
+# macOS
+pg_ctl status -D /usr/local/var/postgresql@14
+
+# Windows
+net start postgresql-x64-14
+
+# Linux
+sudo systemctl start postgresql
+```
+
+**Permission denied on \COPY:**
+Ensure the file paths in Section A of `03_data_ingestion.sql` are absolute paths, not relative.
 
 ---
 
-## Step 6 — Open the Power BI Dashboard
+## Step 4B — Database Setup (SQL Server)
+
+### 4B-1. Create the database
+
+Open **SQL Server Management Studio (SSMS)**, connect to your instance, then run:
+
+```sql
+CREATE DATABASE loan_risk_db;
+GO
+USE loan_risk_db;
+GO
+```
+
+Or from the command line using sqlcmd:
+
+```bash
+sqlcmd -S localhost -E -Q "CREATE DATABASE loan_risk_db;"
+sqlcmd -S localhost -E -d loan_risk_db -Q "USE loan_risk_db;"
+```
+
+### 4B-2. Run the schema script
+
+In SSMS: File → Open → `sql/01_create_schema.sql`
+
+Before running, uncomment **Section (2)** (the SQL Server drop block) and comment out Section (1). Then click Execute (F5).
+
+Or from sqlcmd:
+
+```bash
+sqlcmd -S localhost -E -d loan_risk_db -i sql/01_create_schema.sql
+```
+
+Expected output:
+```
+(0 rows affected)   ← DROP statements
+(0 rows affected)   ← CREATE TABLE ×3
+(0 rows affected)   ← CREATE INDEX ×7
+```
+
+### 4B-3. Load the data
+
+Open `sql/03_data_ingestion.sql` and update the two file paths in **Section B** to use Windows-style full paths, e.g.:
+
+```
+C:\Projects\us-financial-loan-monitoring\data\processed\loan_portfolio.csv
+```
+
+In SSMS, select only the **Section B** block (the `BULK INSERT` commands) and click Execute. Do **not** run Section A.
+
+### 4B-4. Run the dashboard queries
+
+In SSMS, open `sql/02_dashboard_queries.sql`.
+
+For queries that use `LIMIT`, you need to switch to the SQL Server `TOP` syntax. Each such query has both options shown — uncomment `SELECT TOP N` and remove or comment out the `LIMIT N` line at the bottom.
+
+Then run the script, or run individual query blocks as needed.
+
+Repeat the same process for `sql/04_risk_segmentation.sql`.
+
+### 4B-5. Connection string for Power BI DirectQuery (optional)
+
+```
+Server:   localhost  (or your SQL Server instance name)
+Database: loan_risk_db
+Auth:     Windows Authentication  (or SQL Server Authentication)
+```
+
+In Power BI: Get Data → SQL Server → enter server and database name.
+
+### Troubleshooting — SQL Server
+
+**Cannot connect in SSMS:**
+- Confirm SQL Server service is running: open Services (services.msc), find SQL Server (MSSQLSERVER), ensure it shows Running.
+- Try connecting with server name `localhost\SQLEXPRESS` if using the Express edition.
+
+**BULK INSERT permission error:**
+```sql
+-- Grant bulk insert permission (run as admin):
+GRANT ADMINISTER BULK OPERATIONS TO [your_login];
+```
+
+**File path not found:**
+- Use the full Windows path with backslashes: `C:\Projects\...`
+- SQL Server must have read permission on the folder. Right-click the folder → Properties → Security → add the SQL Server service account.
+
+---
+
+## Step 5 — Open the Power BI Dashboard
 
 1. Open **Power BI Desktop**
-2. File → Open → Browse to `powerbi/LoanRiskDashboard.pbix`
-3. If prompted to update data source:
-   - Home → Transform Data → Data Source Settings
-   - Update path to `data/loan_data_with_pd_scores.csv`
-4. Click **Refresh** (Home → Refresh)
-5. All visuals populate automatically
+2. **Get Data → Text/CSV** → select `data/processed/loan_portfolio_scored.csv`
+3. Load the table, then create the DAX measures from `powerbi/DAX_measures.md`
+4. Build the four report pages as described in `powerbi/data_model.md`
 
-### Alternative: Build from Scratch
-If you want to build the dashboard yourself from the CSV:
-1. Get Data → Text/CSV → `data/loan_data_with_pd_scores.csv`
-2. Create the DateTable (copy DAX from `powerbi/DAX_measures.md`)
-3. Create all measures from `powerbi/DAX_measures.md`
-4. Build each page as described in `powerbi/data_model.md`
+> **Connecting to live SQL database (optional):**
+> Instead of loading the CSV, use **Get Data → PostgreSQL** or **Get Data → SQL Server**, enter your connection details from Step 4A-5 or 4B-5, and load the `loan_portfolio` and `loan_risk_scores` tables directly.
 
 ---
 
-## Troubleshooting
+## SQL Script Compatibility Reference
 
-### Python: ModuleNotFoundError
-```bash
-pip install -r python/requirements.txt --upgrade
-```
-
-### XGBoost Install Issues (Windows)
-```bash
-pip install xgboost --pre
-```
-
-### PostgreSQL Connection Refused
-```bash
-# Check if PostgreSQL is running
-pg_ctl status -D /usr/local/var/postgresql@14    # macOS
-net start postgresql-x64-14                       # Windows
-sudo systemctl start postgresql                   # Linux
-```
-
-### Power BI: "Cannot connect to data source"
-- Ensure the CSV file path is absolute, not relative
-- In Power BI: Transform Data → Advanced Editor → update the path string
+| Script | PostgreSQL | SQL Server | Notes |
+|--------|-----------|------------|-------|
+| `01_create_schema.sql` | ✅ | ✅ | Use drop block (1) for PostgreSQL, (2) for SQL Server |
+| `02_dashboard_queries.sql` | ✅ | ✅ | Switch `LIMIT N` ↔ `TOP N` for row-limiting queries |
+| `03_data_ingestion.sql` | ✅ Section A | ✅ Section B | Run only your platform's section |
+| `04_risk_segmentation.sql` | ✅ | ✅ | Switch `LIMIT N` ↔ `TOP N` for watchlist query |
 
 ---
 
@@ -156,31 +275,33 @@ sudo systemctl start postgresql                   # Linux
 us-financial-loan-monitoring/
 │
 ├── sql/
-│   ├── 01_schema_setup.sql          ← Run first: creates all tables
-│   ├── 02_data_ingestion.sql        ← Loads CSV into PostgreSQL
-│   ├── 03_loan_portfolio_kpis.sql   ← Portfolio Overview queries
-│   ├── 04_delinquency_analysis.sql  ← Risk Indicator queries
-│   ├── 05_risk_segmentation.sql     ← Borrower segmentation
-│   └── 06_geographic_risk.sql       ← US map queries
+│   ├── 01_create_schema.sql       ← Run first: tables, indexes, constraints
+│   ├── 02_dashboard_queries.sql   ← All KPI & risk queries (PostgreSQL + SQL Server)
+│   ├── 03_data_ingestion.sql      ← Section A: PostgreSQL | Section B: SQL Server
+│   └── 04_risk_segmentation.sql   ← Segment matrix, watchlist, vintage analysis
 │
 ├── python/
-│   ├── 01_data_generation.py        ← RUN THIS FIRST
-│   ├── 02_eda_analysis.py           ← Exploratory analysis (optional)
-│   ├── 03_default_prediction.py     ← RUN THIS SECOND
+│   ├── 01_data_generation.py      ← RUN FIRST — generates sample_loan_data
+│   ├── 02_eda_analysis.py         ← Portfolio overview charts (optional)
+│   ├── 03_default_prediction.py   ← RUN SECOND — trains PD model, exports scores
 │   └── requirements.txt
 │
 ├── powerbi/
-│   ├── LoanRiskDashboard.pbix       ← Open in Power BI Desktop
-│   ├── DAX_measures.md              ← All formulas documented
-│   └── data_model.md                ← Schema & relationship docs
+│   ├── POWERBI_SETUP.md           ← Step-by-step dashboard build guide
+│   ├── DAX_measures.md            ← All DAX formulas documented
+│   └── LoanRisk_theme.json        ← Custom dark theme file
 │
 ├── data/
-│   ├── sample_loan_data.csv         ← Generated by step 3
-│   ├── loan_data_with_pd_scores.csv ← Generated by step 4 (Power BI input)
-│   ├── model_feature_importance.csv ← Generated by step 4
-│   └── data_dictionary.md           ← Field definitions
+│   └── processed/
+│       ├── loan_portfolio.csv         ← Generated by Step 3
+│       └── loan_portfolio_scored.csv  ← Generated by Step 3 (Power BI input)
+│
+├── outputs/
+│   ├── eda_charts.png             ← 6-panel risk analysis chart
+│   ├── portfolio_overview.png     ← 9-panel portfolio overview chart
+│   └── model_performance.png      ← ROC curves + confusion matrix
 │
 └── docs/
-    ├── methodology.md               ← Risk metrics explained
-    └── setup_guide.md               ← This file
+    ├── setup_guide.md             ← This file
+    └── methodology.md             ← Risk metric definitions & regulatory context
 ```
